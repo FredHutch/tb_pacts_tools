@@ -1,5 +1,7 @@
 message("✓ Loaded custom get_cdisc_labels() from variable_namess.R")
 
+library("openxlsx")
+
 #' Load CDISC Labels for Specified Dataset
 #'
 #' Reads CDISC variable labels from the TB-PACTS Data Dictionary for a specified dataset.
