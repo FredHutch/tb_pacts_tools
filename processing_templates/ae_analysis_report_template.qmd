@@ -1,0 +1,632 @@
+---
+title: "QC Report: Adverse Events Analysis Dataset"
+author: "SEATRAC Hack Day"
+date: today
+date-format: "MMMM D, YYYY"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    number-sections: true
+    code-fold: true
+    code-summary: "Show code"
+    theme: flatly
+    fig-width: 10
+    fig-height: 8
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+knitr:
+  opts_chunk:
+    dev: "ragg_png"  # or "cairo_png"
+---
+
+
+```{r setup}
+#| label: setup
+#| include: false
+
+setwd("/fh/fast/gilbert_p/agartlan/gitrepo/tb_pacts_tools")
+devtools::load_all()
+
+# Set kable options
+options(knitr.kable.NA = "—")
+
+# ============================================================================
+# CONFIGURATION - MODIFY FOR EACH STUDY
+# ============================================================================
+
+STUDY_IDS <- c("TB-1037")
+study_label <- paste(STUDY_IDS, collapse = "_")
+
+# Path to save output analysis dataset (path loaded from helpers.R)
+ADATA_PATH <- file.path(tbpacts_adata, paste(STUDY_IDS, collapse = "_"))
+
+fn <- paste0("ae_adata_", study_label, "_", format(Sys.Date(), "%Y%m%d"), ".csv")
+fn <- "ae_adata_TB-1037_20260121.csv"
+
+ADATA_FILENAME <- file.path(ADATA_PATH, fn)
+
+SAFETY_POPULATION_ONLY <- TRUE
+MIN_PCT_FOR_PLOTS <- 1
+N_TOP_CATEGORIES <- 10
+ARM_COLORS <- c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00")
+
+```
+
+# Introduction: `r study_label` {#sec-intro}
+
+This report provides a high-level analysis of adverse events (AEs) from **`r study_label`**.
+
+**Analysis Settings:**
+
+- Safety population only: `r ifelse(SAFETY_POPULATION_ONLY, "Yes", "No")`
+- Report generated: `r format(Sys.time(), "%Y-%m-%d %H:%M:%S")`
+
+```{r load-data}
+#| label: load-data
+
+# Check file exists
+if (!file.exists(ADATA_FILENAME)) {
+  stop("Analysis dataset not found: ", ADATA_FILENAME)
+}
+
+# Load data
+ae_data_raw <- read.csv(ADATA_FILENAME, stringsAsFactors = FALSE)
+
+# Convert date columns
+for (col in c("ae_st_date", "dt_consent")) {
+  if (col %in% names(ae_data_raw) && !inherits(ae_data_raw[[col]], "Date")) {
+    ae_data_raw[[col]] <- as.Date(ae_data_raw[[col]])
+  }
+}
+
+cat("Loaded:", nrow(ae_data_raw), "records,", n_distinct(ae_data_raw$ptid), "subjects\n")
+```
+
+
+# Data Validation {#sec-validation}
+
+## Required Columns {#sec-required-cols}
+
+```{r validate-required}
+#| label: validate-required
+
+# Define required columns with expected types
+required_cols <- tribble(
+  ~column,               ~type,        ~category,     ~description,
+  "ptid",                "character",  "Required",    "Subject identifier",
+  "arm_code",            "character",  "Required",    "Treatment arm code",
+  "ae_st_date",          "Date",       "Required",    "AE start date",
+  "ae_ctcae_cat",        "character",  "Required",    "AE category (SOC)",
+  "ae_ctcae_term_value", "character",  "Required",    "AE term (HLGT)",
+  "ae_sae",              "character",  "Required",    "Serious AE (Yes/No)",
+  "dt_consent",          "Date",       "Required",    "Consent/cutoff date",
+  "safety_population",   "character",  "Population",  "Safety population flag",
+  "itt_population",      "character",  "Population",  "ITT population flag",
+  "death_flag",          "character",  "Population",  "Death flag"
+)
+
+# Check each column
+validation <- required_cols %>%
+  rowwise() %>%
+  mutate(
+    present = column %in% names(ae_data_raw),
+    actual_type = ifelse(present, class(ae_data_raw[[column]])[1], NA),
+    n_missing = ifelse(present, sum(is.na(ae_data_raw[[column]])), NA),
+    pct_missing = ifelse(present, round(100 * n_missing / nrow(ae_data_raw), 1), NA),
+    status = case_when(
+      !present & category == "Required" ~ "❌ MISSING",
+      !present & category == "Population" ~ "⚠️ Not found",
+      pct_missing > 90 ~ "⚠️ >90% missing",
+      pct_missing > 50 ~ "⚠️ >50% missing",
+      TRUE ~ "✓ OK"
+    )
+  ) %>%
+  ungroup()
+
+validation %>%
+  select(column, category, description, status, pct_missing) %>%
+  kable(col.names = c("Column", "Category", "Description", "Status", "% Missing"),
+        caption = "Column Validation Summary") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  column_spec(4, bold = TRUE)
+
+# Check for critical failures
+critical_missing <- validation %>% 
+  filter(status == "❌ MISSING") %>% 
+  pull(column)
+
+if (length(critical_missing) > 0) {
+  cat("\n⛔ CRITICAL: Missing required columns:", paste(critical_missing, collapse = ", "), "\n")
+  cat("The analysis may not complete. Check the processing template.\n")
+}
+```
+
+## Population Flags {#sec-pop-flags}
+
+```{r check-population-flags}
+#| label: check-population-flags
+
+# Check population flag values
+pop_summary <- list()
+
+if ("safety_population" %in% names(ae_data_raw)) {
+  pop_summary$safety <- ae_data_raw %>%
+    count(safety_population, name = "n_records") %>%
+    mutate(
+      n_subjects = sapply(safety_population, function(x) {
+        n_distinct(ae_data_raw$ptid[ae_data_raw$safety_population == x])
+      }),
+      pct = round(100 * n_records / sum(n_records), 1)
+    )
+  
+  cat("Safety Population Flag:\n")
+  print(kable(pop_summary$safety, col.names = c("Value", "Records", "Subjects", "%")) %>%
+          kable_styling(bootstrap_options = c("striped"), full_width = FALSE))
+} else {
+  cat("⚠️ safety_population column not found\n")
+  cat("All subjects will be included in analysis.\n")
+}
+
+if ("itt_population" %in% names(ae_data_raw)) {
+  pop_summary$itt <- ae_data_raw %>%
+    count(itt_population, name = "n_records") %>%
+    mutate(pct = round(100 * n_records / sum(n_records), 1))
+  
+  cat("\nITT Population Flag:\n")
+  print(kable(pop_summary$itt) %>%
+          kable_styling(bootstrap_options = c("striped"), full_width = FALSE))
+}
+
+if ("death_flag" %in% names(ae_data_raw)) {
+  n_deaths <- ae_data_raw %>%
+    filter(death_flag == "Yes") %>%
+    summarise(n_subjects = n_distinct(ptid)) %>%
+    pull()
+  cat("\nDeaths:", n_deaths, "subjects\n")
+}
+```
+
+## AE Classification Values {#sec-ae-values}
+```{r check-ae-values}
+#| label: check-ae-values
+#| results: asis
+
+# Check ae_sae values
+if ("ae_sae" %in% names(ae_data_raw)) {
+  sae_values <- unique(ae_data_raw$ae_sae)
+  valid_sae <- c("Yes", "No", NA)
+  invalid_sae <- setdiff(sae_values, valid_sae)
+  
+  if (length(invalid_sae) > 0) {
+    cat("⚠️ Unexpected ae_sae values:", paste(invalid_sae, collapse = ", "), "\n\n")
+  } else {
+    cat("✓ ae_sae values are valid (Yes/No)\n\n")
+  }
+  
+  ae_data_raw %>%
+    count(ae_sae, name = "n") %>%
+    mutate(pct = round(100 * n / sum(n), 1)) %>%
+    kable(col.names = c("ae_sae", "N", "%"), caption = "SAE Distribution") %>%
+    kable_styling(bootstrap_options = c("striped"), full_width = FALSE) %>%
+    print()
+}
+
+# Check treatment arms
+if ("arm_code" %in% names(ae_data_raw)) {
+  cat("\nTreatment Arms:\n")
+  ae_data_raw %>%
+    group_by(arm_code) %>%
+    summarise(
+      n_subjects = n_distinct(ptid),
+      n_events = n(),
+      .groups = "drop"
+    ) %>%
+    kable(col.names = c("Arm", "Subjects", "Events")) %>%
+    kable_styling(bootstrap_options = c("striped"), full_width = FALSE) %>%
+    print()
+}
+```
+
+## Apply Population Filter {#sec-apply-filter}
+
+```{r apply-population-filter}
+#| label: apply-population-filter
+#| results: asis
+
+# Apply safety population filter if requested
+ae_data <- ae_data_raw
+
+if (SAFETY_POPULATION_ONLY) {
+  if ("safety_population" %in% names(ae_data)) {
+    n_before <- nrow(ae_data)
+    subj_before <- n_distinct(ae_data$ptid)
+    
+    ae_data <- ae_data %>% filter(safety_population == "Yes")
+    
+    n_after <- nrow(ae_data)
+    subj_after <- n_distinct(ae_data$ptid)
+    
+    cat("Filtered to safety population:\n")
+    cat("  Records:", n_before, "→", n_after, "\n")
+    cat("  Subjects:", subj_before, "→", subj_after, "\n")
+  } else {
+    cat("⚠️ safety_population column not found. Using all records.\n")
+  }
+} else {
+  cat("Using all records (safety_population_only = FALSE)\n")
+}
+
+# Final dataset summary
+cat("\nAnalysis dataset:", nrow(ae_data), "records,", n_distinct(ae_data$ptid), "subjects\n")
+
+# Set up arm colors
+arms <- sort(unique(ae_data$arm_code))
+n_arms <- length(arms)
+arm_colors <- setNames(ARM_COLORS[1:n_arms], arms)
+```
+
+
+# Descriptive Analysis {#sec-descriptive}
+
+## Overall Summary {#sec-overall}
+
+```{r overall-summary}
+#| label: overall-summary
+
+overall <- ae_data %>%
+  summarise(
+    `Total AE Records` = n(),
+    `Unique Subjects` = n_distinct(ptid),
+    `Treatment Arms` = n_distinct(arm_code),
+    `AE Categories (SOC)` = n_distinct(ae_ctcae_cat, na.rm = TRUE),
+    `AE Terms (HLGT)` = n_distinct(ae_ctcae_term_value, na.rm = TRUE),
+    `Serious AEs` = sum(ae_sae == "Yes", na.rm = TRUE),
+    `Non-Serious AEs` = sum(ae_sae == "No", na.rm = TRUE)
+  ) %>%
+  pivot_longer(everything(), names_to = "Metric", values_to = "Value")
+
+overall %>%
+  kable(caption = "Dataset Summary") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Summary by Treatment Arm {#sec-by-arm}
+
+```{r summary-by-arm}
+#| label: summary-by-arm
+
+arm_summary <- summarize_by_arm(ae_data)
+
+arm_summary %>%
+  kable(
+    col.names = c("Arm", "Subjects", "Events", "SAE", "Non-SAE", "Events/Subject"),
+    caption = "Summary by Treatment Arm"
+  ) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+# Plot
+arm_summary %>%
+  select(arm_code, n_subjects, n_events) %>%
+  pivot_longer(-arm_code, names_to = "metric", values_to = "count") %>%
+  mutate(metric = recode(metric, n_subjects = "Subjects", n_events = "Events")) %>%
+  ggplot(aes(x = arm_code, y = count, fill = arm_code)) +
+  geom_col() +
+  facet_wrap(~metric, scales = "free_y") +
+  scale_fill_manual(values = arm_colors) +
+  labs(title = "Subjects and Events by Treatment Arm", x = NULL, y = "Count") +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+## Population Flag Summary by Arm {#sec-pop-by-arm}
+
+```{r pop-summary-by-arm}
+#| label: pop-summary-by-arm
+#| results: asis
+
+# Safety population by arm
+if ("safety_population" %in% names(ae_data_raw)) {
+  safety_by_arm <- ae_data_raw %>%
+    group_by(arm_code, safety_population) %>%
+    summarise(n_subjects = n_distinct(ptid), .groups = "drop") %>%
+    pivot_wider(names_from = safety_population, values_from = n_subjects, values_fill = 0)
+  
+  cat("Safety Population by Arm:\n")
+  safety_by_arm %>%
+    kable() %>%
+    kable_styling(bootstrap_options = c("striped"), full_width = FALSE) %>%
+    print()
+}
+
+# Deaths by arm
+if ("death_flag" %in% names(ae_data_raw)) {
+  deaths_by_arm <- ae_data_raw %>%
+    filter(death_flag == "Yes") %>%
+    group_by(arm_code) %>%
+    summarise(n_deaths = n_distinct(ptid), .groups = "drop")
+  
+  if (nrow(deaths_by_arm) > 0) {
+    cat("\nDeaths by Arm:\n")
+    deaths_by_arm %>%
+      kable(col.names = c("Arm", "Deaths")) %>%
+      kable_styling(bootstrap_options = c("striped"), full_width = FALSE) %>%
+      print()
+  }
+}
+```
+
+## Top AE Categories {#sec-top-categories}
+
+```{r top-categories}
+#| label: top-categories
+
+category_summary <- ae_data %>%
+  filter(!is.na(ae_ctcae_cat)) %>%
+  group_by(ae_ctcae_cat) %>%
+  summarise(
+    n_events = n(),
+    n_subjects = n_distinct(ptid),
+    n_sae = sum(ae_sae == "Yes", na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(pct = round(100 * n_events / sum(n_events), 1)) %>%
+  arrange(desc(n_events))
+
+category_summary %>%
+  head(15) %>%
+  kable(
+    col.names = c("Category (SOC)", "Events", "Subjects", "SAE", "% of Total"),
+    caption = "Top 15 AE Categories"
+  ) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+# Plot
+category_summary %>%
+  head(10) %>%
+  mutate(ae_ctcae_cat = fct_reorder(ae_ctcae_cat, n_events)) %>%
+  ggplot(aes(x = n_events, y = ae_ctcae_cat)) +
+  geom_col(fill = "#377EB8") +
+  labs(title = "Top 10 AE Categories", x = "Number of Events", y = NULL) +
+  theme_bw()
+```
+
+## Serious vs Non-Serious AEs {#sec-sae-summary}
+
+```{r sae-summary}
+#| label: sae-summary
+
+sae_by_arm <- ae_data %>%
+  group_by(arm_code, ae_sae) %>%
+  summarise(
+    n_events = n(),
+    n_subjects = n_distinct(ptid),
+    .groups = "drop"
+  )
+
+# Add total subjects per arm
+totals <- ae_data %>%
+  group_by(arm_code) %>%
+  summarise(total_subjects = n_distinct(ptid), .groups = "drop")
+
+sae_by_arm <- sae_by_arm %>%
+  left_join(totals, by = "arm_code") %>%
+  mutate(pct_subjects = round(100 * n_subjects / total_subjects, 1))
+
+sae_by_arm %>%
+  kable(
+    col.names = c("Arm", "SAE Type", "Events", "Subjects", "Total Subjects", "% Subjects"),
+    caption = "Serious vs Non-Serious AEs"
+  ) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+# Plot
+ggplot(sae_by_arm, aes(x = arm_code, y = n_events, fill = ae_sae)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(
+    values = c("Yes" = "#E41A1C", "No" = "#377EB8"),
+    labels = c("Yes" = "Serious", "No" = "Non-Serious")
+  ) +
+  labs(
+    title = "AE Events by Seriousness and Treatment Arm",
+    x = "Treatment Arm", y = "Events", fill = "Serious"
+  ) +
+  theme_bw()
+```
+
+
+# Visualizations {#sec-viz}
+
+## Prepare Plot Data {#sec-prep-plots}
+
+```{r prep-plot-data}
+#| label: prep-plot-data
+
+# Process for both SAE and Other
+results_other <- process_all_arms(ae_data, "Other", safety_population_only = FALSE)
+results_serious <- process_all_arms(ae_data, "Serious", safety_population_only = FALSE)
+
+# Prepare filtered data for each arm
+filtered_list <- list()
+
+for (arm in arms) {
+  if (arm %in% names(results_other$arm_tables)) {
+    filtered_list[[paste0(arm, "_Other")]] <- 
+      prepare_filtered_data(results_other$arm_tables[[arm]], arm)
+  }
+  if (arm %in% names(results_serious$arm_tables)) {
+    filtered_list[[paste0(arm, "_Serious")]] <- 
+      prepare_filtered_data(results_serious$arm_tables[[arm]], arm)
+  }
+}
+
+# Combine
+filtered_ae_data <- bind_rows(filtered_list)
+
+# Deduplicate
+filtered_data <- filtered_ae_data %>%
+  group_by(event_type, organSystemName, arm_desc) %>%
+  arrange(desc(numAffected), .by_group = TRUE) %>%
+  filter(row_number() == 1) %>%
+  ungroup()
+
+cat("Prepared plot data for", n_arms, "arms:", paste(arms, collapse = ", "), "\n")
+```
+
+## Radar Plots {#sec-radar}
+
+```{r radar-plots}
+#| label: radar-plots
+#| fig-width: 12
+#| fig-height: 6
+
+spider_plots <- list()
+
+for (event in c("Other", "Serious")) {
+  event_dat <- filtered_data %>%
+    filter(event_type == event, !is.na(organSystemName)) %>%
+    arrange(desc(numAffected))
+  
+  if (nrow(event_dat) == 0) next
+  
+  # Top N categories
+  top_cats <- event_dat %>%
+    group_by(organSystemName) %>%
+    summarise(total = sum(numAffected), .groups = "drop") %>%
+    arrange(desc(total)) %>%
+    head(N_TOP_CATEGORIES) %>%
+    pull(organSystemName)
+  
+  # Pivot for radar
+  radar_dat <- event_dat %>%
+    filter(organSystemName %in% top_cats) %>%
+    select(organSystemName, arm_desc, pct_affected) %>%
+    pivot_wider(
+      names_from = arm_desc,
+      values_from = pct_affected,
+      values_fill = 0
+    ) %>%
+    complete(organSystemName = top_cats) %>%
+    mutate(across(everything(), ~replace_na(., 0)))
+  
+  # Format for ggradar
+  spider_dat <- as.data.frame(t(radar_dat %>% rename(Category = organSystemName)))
+  names(spider_dat) <- spider_dat[1, ]
+  spider_dat <- spider_dat[-1, , drop = FALSE]
+  spider_dat <- spider_dat %>%
+    tibble::add_column(Name = rownames(spider_dat), .before = 1) %>%
+    mutate(across(-Name, as.numeric))
+  rownames(spider_dat) <- NULL
+  spider_dat$Name <- factor(spider_dat$Name, levels = arms)
+  
+  # Create plot
+  spider_plots[[event]] <- ggradar(
+    spider_dat,
+    background.circle.colour = "white",
+    legend.position = "bottom",
+    grid.min = 0, grid.mid = 0.5, grid.max = 1,
+    axis.label.size = 3, grid.label.size = 3,
+    group.colours = unname(arm_colors[1:nrow(spider_dat)]),
+    group.point.size = 2, group.line.width = 1
+  ) +
+    ggtitle(paste(event, "AEs by Body System")) +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+}
+
+if (length(spider_plots) > 1) {
+  ggarrange(plotlist = spider_plots, common.legend = TRUE, legend = "bottom")
+} else if (length(spider_plots) == 1) {
+  spider_plots[[1]]
+}
+```
+
+## Lollipop Plots {#sec-lollipop}
+
+```{r lollipop-plots}
+#| label: lollipop-plots
+#| fig-width: 14
+#| fig-height: 10
+
+love_dat <- filtered_ae_data %>%
+  filter(!is.na(term)) %>%
+  group_by(term, event_type) %>%
+  mutate(total_pct = sum(numAffected) / sum(numAtRisk)) %>%
+  ungroup() %>%
+  mutate(pct_by_arm = numAffected / numAtRisk)
+
+love_plots <- list()
+
+for (event in c("Other", "Serious")) {
+  plot_dat <- love_dat %>%
+    filter(event_type == event, total_pct >= MIN_PCT_FOR_PLOTS / 1000) %>%
+    mutate(term = fct_reorder(term, total_pct))
+  
+  if (nrow(plot_dat) < 2) next
+  
+  love_plots[[event]] <- ggplot(
+    plot_dat,
+    aes(x = pct_by_arm * 100, y = term, group = arm_desc, color = arm_desc)
+  ) +
+    geom_point(size = 2) +
+    geom_line(orientation = "y", linewidth = 0.9) +
+    scale_color_manual(values = arm_colors) +
+    labs(
+      title = paste(event, "AEs"),
+      x = "% Patients Affected",
+      y = NULL,
+      color = "Arm"
+    ) +
+    theme_bw() +
+    theme(axis.text.y = element_text(size = 7))
+}
+
+if (length(love_plots) > 1) {
+  ggarrange(plotlist = love_plots, common.legend = TRUE, legend = "bottom", ncol = 2)
+} else if (length(love_plots) == 1) {
+  love_plots[[1]]
+}
+```
+
+## Rate Comparison Tables {#sec-rate-tables}
+
+```{r rate-tables}
+#| label: rate-tables
+
+rate_table <- filtered_data %>%
+  filter(!is.na(organSystemName), !is.na(term)) %>%
+  mutate(
+    rate = paste0(numAffected, "/", numAtRisk, " (", round(pct_affected * 100, 1), "%)")
+  ) %>%
+  select(term, organSystemName, event_type, arm_desc, rate) %>%
+  pivot_wider(names_from = arm_desc, values_from = rate, values_fill = "0/- (0%)")
+
+# Non-serious
+rate_table %>%
+  filter(event_type == "Other") %>%
+  arrange(organSystemName, term) %>%
+  select(-event_type) %>%
+  head(25) %>%
+  kable(caption = "Non-Serious AE Rates (Top 25)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), font_size = 10)
+
+# Serious
+rate_table %>%
+  filter(event_type == "Serious") %>%
+  arrange(organSystemName, term) %>%
+  select(-event_type) %>%
+  head(15) %>%
+  kable(caption = "Serious AE Rates") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), font_size = 10)
+```
+
+
+# Session Info {#sec-session}
+
+```{r session-info}
+#| label: session-info
+sessionInfo()
+```

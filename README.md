@@ -2,14 +2,28 @@
 
 ## Instructions
 
-### RECONFIGURE THE FOLLOWING PATHS:
+### DEPENDENCIES
 
 ```{r}
-tb_pacts_csv    = '/Volumes/fh/fast/gilbert_p/fg_data/TB-PACTS/csv'
-tb_pacts_rds    = '/Volumes/fh/fast/gilbert_p/fg_data/TB-PACTS/rds_files'
-metadata_folder = '/Volumes/fh/fast/gilbert_p/fg_data/TB-PACTS/metadata'
-figure_save_folder = '/Volumes/fh/fast/gilbert_p/fg_data/TB-PACTS/gitrepos/tb_pacts_tools/demonstration/ae_demo_figures'
+magrittr
+dplyr
+summarytools
+tidyr
+ggplot2
+knitr
+kableExtra
+lubridate
+stringr
+forcats
+ggradar
+ggpubr
+purrr
+ragg
 ```
+
+### RECONFIGURE THE FOLLOWING:
+
+Define `tbacts_datapath` in `R/helpers.R`. It should end with "TB-PACTS" and contain a folder "csv" containing all the CDISC datasets.
 
 ### LOAD HELPER FUNCTIONS WITH `devtools::load_all()`
 
