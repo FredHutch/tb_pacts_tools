@@ -96,26 +96,8 @@ message("Started: ", Sys.time())
 
 message("\n--- Loading Data ---")
 
-# Load AE data
-ae_file <- file.path(DATA_INPUT_PATH, "ae.csv")
-if (!file.exists(ae_file)) stop("AE file not found: ", ae_file)
-ae_raw <- read.csv(ae_file, stringsAsFactors = FALSE)
-message("AE raw: ", nrow(ae_raw), " rows")
-
-# Load DM data
-dm_file <- file.path(DATA_INPUT_PATH, "dm.csv")
-if (!file.exists(dm_file)) stop("DM file not found: ", dm_file)
-dm_raw <- read.csv(dm_file, stringsAsFactors = FALSE)
-message("DM raw: ", nrow(dm_raw), " rows")
-
-# Filter to study and clean column names
-ae <- ae_raw %>% 
-  filter(STUDYID %in% STUDY_IDS) %>%
-  rm_empty_cols(to_lower = TRUE)
-
-dm <- dm_raw %>% 
-  filter(STUDYID %in% STUDY_IDS) %>%
-  rm_empty_cols(to_lower = TRUE)
+ae <- load_domain("ae", DATA_INPUT_PATH, STUDY_IDS, required = TRUE)
+dm <- load_domain("dm", DATA_INPUT_PATH, STUDY_IDS, required = TRUE)
 
 message("AE after study filter: ", nrow(ae), " rows, ", ncol(ae), " columns")
 message("DM after study filter: ", nrow(dm), " rows, ", ncol(dm), " columns")

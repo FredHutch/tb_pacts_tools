@@ -1,7 +1,4 @@
-message("✓ Loaded Katrina Dobinda's custom functions: pre_processing_ae_data()")
-message("✓ Loaded Katrina Dobinda's custom functions: ctgov_ae_tables_single_arm()")
-message("✓ Loaded Katrina Dobinda's custom functions: ctgov_ae_tables_multi_arm()")
-message("✓ Loaded Katrina Dobinda's custom functions: exporting_xlsx_template()")
+message("✓ Loaded Katrina Dobinda's custom functions (ctgov_functions.R)")
 
 ##############################################################################
 # Modified to R oxygen style comments -- code checked identical by diffchecker 

@@ -1,4 +1,56 @@
-message("✓ Loaded custom functions for data cleaning from data_cleaning_functions.R")
+message("✓ Loaded custom functions for data loading and cleaning from data_cleaning_functions.R")
+
+#' Load and Filter a CDISC Domain
+#'
+#' Loads a CDISC SDTM domain CSV file, filters to specified study IDs,
+#' removes empty columns, and converts column names to lowercase.
+#'
+#' @param domain_name Character string of the domain name (e.g., "ae", "dm", "mb")
+#' @param data_path Path to directory containing the CSV files
+#' @param study_ids Character vector of study IDs to filter to
+#' @param required Logical. If TRUE, stops with error when file not found.
+#'   If FALSE, returns NULL with a warning. Default is FALSE.
+#'
+#' @return A data frame with the filtered domain data, or NULL if file not found
+#'   and required = FALSE
+#'
+#' @examples
+#' dm <- load_domain("dm", "/path/to/data", "TB-1037", required = TRUE)
+#' da <- load_domain("da", "/path/to/data", "TB-1037", required = FALSE)
+#'
+#' @export
+load_domain <- function(domain_name, data_path, study_ids, required = FALSE) {
+  file_path <- file.path(data_path, paste0(domain_name, ".csv"))
+  
+  if (!file.exists(file_path)) {
+    msg <- paste0(toupper(domain_name), " file not found: ", file_path)
+    if (required) {
+      stop(msg)
+    } else {
+      warning(msg)
+      return(NULL)
+    }
+  }
+  
+  df <- read.csv(file_path, stringsAsFactors = FALSE) %>%
+    filter(STUDYID %in% study_ids) %>%
+    rm_empty_cols(to_lower = TRUE)
+  
+  message(toupper(domain_name), ": ", nrow(df), " rows, ", ncol(df), " columns")
+  
+  if (nrow(df) == 0) {
+    msg <- paste0("No ", toupper(domain_name), " records found for study: ", 
+                  paste(study_ids, collapse = ", "))
+    if (required) {
+      stop(msg)
+    } else {
+      warning(msg)
+      return(NULL)
+    }
+  }
+  
+  return(df)
+}
 
 #' Remove Empty Columns from a Data Frame
 #'

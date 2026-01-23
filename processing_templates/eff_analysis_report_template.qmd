@@ -1,0 +1,598 @@
+---
+title: "QC Report: Efficacy Analysis Dataset"
+author: "SEATRAC Hack Day"
+date: today
+date-format: "MMMM D, YYYY"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    number-sections: true
+    code-fold: true
+    code-summary: "Show code"
+    theme: flatly
+    fig-width: 10
+    fig-height: 8
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+knitr:
+  opts_chunk:
+    dev: "ragg_png"
+---
+
+
+```{r setup}
+#| label: setup
+#| include: false
+
+setwd("/fh/fast/gilbert_p/agartlan/gitrepo/tb_pacts_tools")
+devtools::load_all()
+
+# Set kable options
+options(knitr.kable.NA = "—")
+
+# ============================================================================
+# CONFIGURATION - MODIFY FOR EACH STUDY
+# ============================================================================
+
+STUDY_IDS <- c("TB-1037")
+study_label <- paste(STUDY_IDS, collapse = "_")
+
+# Path to analysis dataset
+ADATA_PATH <- file.path(tbpacts_adata, paste(STUDY_IDS, collapse = "_"))
+
+# Filename (update date as needed or use dynamic generation)
+fn <- paste0("eff_adata_", study_label, "_", format(Sys.Date(), "%Y%m%d"), ".csv")
+# fn <- "eff_adata_TB-1037_20260122.csv"  # Or hardcode specific file
+
+ADATA_FILENAME <- file.path(ADATA_PATH, fn)
+
+# Analysis settings
+ANALYSIS_POPULATION <- "itt_flag"  # Options: "randomized_flag", "itt_flag", "safety_flag", "pp_flag"
+ARM_COLORS <- c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00")
+
+# KM plot settings
+KM_BREAK_TIME <- 7      # Days between x-axis breaks
+KM_XLIM <- c(0, 112)    # X-axis limits (days)
+```
+
+# Introduction: `r study_label` {#sec-intro}
+This report provides validation and visualization of the efficacy analysis dataset for **`r study_label`**.
+
+**Analysis Settings:**
+
+- Analysis population: `r ANALYSIS_POPULATION`
+- Report generated: `r format(Sys.time(), "%Y-%m-%d %H:%M:%S")`
+
+```{r load-data}
+#| label: load-data
+
+# Check file exists
+if (!file.exists(ADATA_FILENAME)) {
+  stop("Analysis dataset not found: ", ADATA_FILENAME)
+}
+
+# Load data
+eff_data_raw <- read.csv(ADATA_FILENAME, stringsAsFactors = FALSE)
+
+cat("Loaded:", nrow(eff_data_raw), "subjects\n")
+cat("File:", ADATA_FILENAME, "\n")
+```
+
+
+# Data Validation {#sec-validation}
+
+## Required Columns {#sec-required-cols}
+
+```{r validate-required}
+#| label: validate-required
+
+# Define required columns
+required_cols <- tribble(
+  ~column,           ~type,        ~category,     ~description,
+  "subject_id",      "character",  "Required",    "Subject identifier",
+  "arm",             "character",  "Required",    "Treatment arm (full name)",
+  "arm_label",       "character",  "Required",    "Treatment arm (short label)",
+  "ttcc_time",       "numeric",    "Required",    "Time to culture conversion (days)",
+  "ttcc_event",      "numeric",    "Required",    "Conversion indicator (1=converted, 0=censored)",
+  "randomized_flag", "logical",    "Population",  "Randomized population flag",
+  "itt_flag",        "logical",    "Population",  "ITT population flag",
+  "safety_flag",     "logical",    "Population",  "Safety population flag",
+  "pp_flag",         "logical",    "Population",  "Per-protocol population flag"
+)
+
+# Check each column
+validation <- required_cols %>%
+  rowwise() %>%
+  mutate(
+    present = column %in% names(eff_data_raw),
+    actual_type = ifelse(present, class(eff_data_raw[[column]])[1], NA),
+    n_missing = ifelse(present, sum(is.na(eff_data_raw[[column]])), NA),
+    pct_missing = ifelse(present, round(100 * n_missing / nrow(eff_data_raw), 1), NA),
+    status = case_when(
+      !present & category == "Required" ~ "❌ MISSING",
+      !present & category == "Population" ~ "⚠️ Not found",
+      pct_missing > 50 ~ "⚠️ >50% missing",
+      TRUE ~ "✓ OK"
+    )
+  ) %>%
+  ungroup()
+
+validation %>%
+  select(column, category, description, status, pct_missing) %>%
+  kable(col.names = c("Column", "Category", "Description", "Status", "% Missing"),
+        caption = "Column Validation Summary") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  column_spec(4, bold = TRUE)
+
+# Check for critical failures
+critical_missing <- validation %>%
+  filter(status == "❌ MISSING") %>%
+  pull(column)
+
+if (length(critical_missing) > 0) {
+  cat("\n⛔ CRITICAL: Missing required columns:", paste(critical_missing, collapse = ", "), "\n")
+}
+```
+
+## Population Flags {#sec-pop-flags}
+
+```{r check-population-flags}
+#| label: check-population-flags
+#| results: asis
+
+# Summarize population flags
+pop_flags <- c("randomized_flag", "itt_flag", "safety_flag", "pp_flag")
+pop_summary <- data.frame(
+  Population = c("Randomized", "ITT", "Safety", "Per-Protocol"),
+  Flag = pop_flags,
+  stringsAsFactors = FALSE
+)
+
+pop_summary <- pop_summary %>%
+  rowwise() %>%
+  mutate(
+    present = Flag %in% names(eff_data_raw),
+    n_true = ifelse(present, sum(eff_data_raw[[Flag]] == TRUE, na.rm = TRUE), NA),
+    n_false = ifelse(present, sum(eff_data_raw[[Flag]] == FALSE, na.rm = TRUE), NA),
+    n_missing = ifelse(present, sum(is.na(eff_data_raw[[Flag]])), NA)
+  ) %>%
+  ungroup()
+
+pop_summary %>%
+  select(Population, n_true, n_false, n_missing) %>%
+  kable(col.names = c("Population", "N (True)", "N (False)", "N (Missing)"),
+        caption = "Population Flag Summary") %>%
+  kable_styling(bootstrap_options = c("striped"), full_width = FALSE)
+```
+
+## TTCC Endpoint Values {#sec-ttcc-values}
+
+```{r check-ttcc-values}
+#| label: check-ttcc-values
+#| results: asis
+
+# Check TTCC event values
+if ("ttcc_event" %in% names(eff_data_raw)) {
+  event_values <- unique(eff_data_raw$ttcc_event)
+  valid_events <- c(0, 1, NA)
+  invalid_events <- setdiff(event_values, valid_events)
+ 
+  if (length(invalid_events) > 0) {
+    cat("⚠️ Unexpected ttcc_event values:", paste(invalid_events, collapse = ", "), "\n\n")
+  } else {
+    cat("✓ ttcc_event values are valid (0/1)\n\n")
+  }
+ 
+  eff_data_raw %>%
+    count(ttcc_event, name = "n") %>%
+    mutate(
+      status = case_when(
+        ttcc_event == 1 ~ "Converted",
+        ttcc_event == 0 ~ "Censored",
+        TRUE ~ "Missing"
+      ),
+      pct = round(100 * n / sum(n), 1)
+    ) %>%
+    select(status, ttcc_event, n, pct) %>%
+    kable(col.names = c("Status", "Event Code", "N", "%"),
+          caption = "TTCC Event Distribution") %>%
+    kable_styling(bootstrap_options = c("striped"), full_width = FALSE) %>%
+    print()
+}
+
+# TTCC time summary
+if ("ttcc_time" %in% names(eff_data_raw)) {
+  cat("\n\nTTCC Time Summary:\n\n")
+  summary_stats <- eff_data_raw %>%
+    summarise(
+      min = min(ttcc_time, na.rm = TRUE),
+      q25 = quantile(ttcc_time, 0.25, na.rm = TRUE),
+      median = median(ttcc_time, na.rm = TRUE),
+      q75 = quantile(ttcc_time, 0.75, na.rm = TRUE),
+      max = max(ttcc_time, na.rm = TRUE),
+      n_missing = sum(is.na(ttcc_time))
+    )
+ 
+  summary_stats %>%
+    kable(col.names = c("Min", "Q25", "Median", "Q75", "Max", "N Missing"),
+          caption = "TTCC Time (days)") %>%
+    kable_styling(bootstrap_options = c("striped"), full_width = FALSE) %>%
+    print()
+}
+```
+
+## Treatment Arms {#sec-arms}
+
+```{r check-arms}
+#| label: check-arms
+#| results: asis
+
+if ("arm_label" %in% names(eff_data_raw)) {
+  cat("Treatment Arms:\n\n")
+  eff_data_raw %>%
+    group_by(arm_label) %>%
+    summarise(
+      n_subjects = n(),
+      n_converted = sum(ttcc_event == 1, na.rm = TRUE),
+      n_censored = sum(ttcc_event == 0, na.rm = TRUE),
+      conversion_rate = round(100 * n_converted / n_subjects, 1),
+      .groups = "drop"
+    ) %>%
+    kable(col.names = c("Arm", "N Subjects", "Converted", "Censored", "Conversion %"),
+          caption = "TTCC by Treatment Arm") %>%
+    kable_styling(bootstrap_options = c("striped"), full_width = FALSE) %>%
+    print()
+}
+
+# Set up arm colors for plots
+arms <- sort(unique(eff_data_raw$arm_label))
+n_arms <- length(arms)
+arm_colors <- setNames(ARM_COLORS[1:n_arms], arms)
+```
+
+
+# Apply Analysis Population Filter {#sec-filter}
+
+```{r apply-population-filter}
+#| label: apply-population-filter
+#| results: asis
+
+eff_data <- eff_data_raw
+
+if (ANALYSIS_POPULATION %in% names(eff_data)) {
+  n_before <- nrow(eff_data)
+ 
+  eff_data <- eff_data %>% filter(.data[[ANALYSIS_POPULATION]] == TRUE)
+ 
+  n_after <- nrow(eff_data)
+ 
+  cat("Filtered to", ANALYSIS_POPULATION, "population:\n")
+  cat("  Subjects:", n_before, "→", n_after, "\n\n")
+} else {
+  cat("⚠️ Population flag", ANALYSIS_POPULATION, "not found. Using all subjects.\n\n")
+}
+
+cat("Analysis dataset:", nrow(eff_data), "subjects\n")
+```
+
+
+# Descriptive Analysis {#sec-descriptive}
+
+## Population Summary {#sec-pop-summary}
+
+```{r population-summary}
+#| label: population-summary
+
+# Overall summary
+overall <- eff_data %>%
+  summarise(
+    `Total Subjects` = n(),
+    `Treatment Arms` = n_distinct(arm_label),
+    `Converted` = sum(ttcc_event == 1, na.rm = TRUE),
+    `Censored` = sum(ttcc_event == 0, na.rm = TRUE),
+    `Conversion Rate (%)` = round(100 * sum(ttcc_event == 1, na.rm = TRUE) / n(), 1),
+    `Median TTCC (converted)` = median(ttcc_time[ttcc_event == 1], na.rm = TRUE)
+  ) %>%
+  pivot_longer(everything(), names_to = "Metric", values_to = "Value")
+
+overall %>%
+  kable(caption = "Overall Efficacy Summary") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Summary by Treatment Arm {#sec-arm-summary}
+
+```{r arm-summary}
+#| label: arm-summary
+
+arm_summary <- eff_data %>%
+  group_by(arm_label) %>%
+  summarise(
+    n_subjects = n(),
+    n_converted = sum(ttcc_event == 1, na.rm = TRUE),
+    n_censored = sum(ttcc_event == 0, na.rm = TRUE),
+    conversion_rate = round(100 * n_converted / n_subjects, 1),
+    median_ttcc = median(ttcc_time[ttcc_event == 1], na.rm = TRUE),
+    q25_ttcc = quantile(ttcc_time[ttcc_event == 1], 0.25, na.rm = TRUE),
+    q75_ttcc = quantile(ttcc_time[ttcc_event == 1], 0.75, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+arm_summary %>%
+  kable(
+    col.names = c("Arm", "N", "Converted", "Censored", "Conv %", "Median TTCC", "Q25", "Q75"),
+    caption = "TTCC Summary by Treatment Arm"
+  ) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+# Bar plot of conversion rates
+ggplot(arm_summary, aes(x = arm_label, y = conversion_rate, fill = arm_label)) +
+  geom_col() +
+  geom_text(aes(label = paste0(conversion_rate, "%")), vjust = -0.5) +
+  scale_fill_manual(values = arm_colors) +
+  labs(
+    title = "Culture Conversion Rate by Treatment Arm",
+    x = NULL,
+    y = "Conversion Rate (%)"
+  ) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  ylim(0, 100)
+```
+
+## TTCC Time Distribution {#sec-ttcc-dist}
+
+```{r ttcc-distribution}
+#| label: ttcc-distribution
+
+# Histogram of TTCC times for converted subjects
+converted_data <- eff_data %>% filter(ttcc_event == 1)
+
+if (nrow(converted_data) > 0) {
+  ggplot(converted_data, aes(x = ttcc_time, fill = arm_label)) +
+    geom_histogram(binwidth = 7, position = "dodge", alpha = 0.7) +
+    scale_fill_manual(values = arm_colors) +
+    labs(
+      title = "Distribution of Time to Culture Conversion",
+      subtitle = "Among subjects who converted",
+      x = "Days to Conversion",
+      y = "Number of Subjects",
+      fill = "Arm"
+    ) +
+    theme_bw()
+}
+
+# Box plot
+if (nrow(converted_data) > 0) {
+  ggplot(converted_data, aes(x = arm_label, y = ttcc_time, fill = arm_label)) +
+    geom_boxplot(alpha = 0.7) +
+    geom_jitter(width = 0.2, alpha = 0.5, size = 1) +
+    scale_fill_manual(values = arm_colors) +
+    labs(
+      title = "Time to Culture Conversion by Treatment Arm",
+      subtitle = "Among subjects who converted",
+      x = NULL,
+      y = "Days to Conversion"
+    ) +
+    theme_bw() +
+    theme(legend.position = "none")
+}
+```
+
+
+# Kaplan-Meier Analysis {#sec-km}
+
+## Kaplan-Meier Curve {#sec-km-curve}
+
+```{r km-analysis}
+#| label: km-analysis
+#| fig-width: 10
+#| fig-height: 8
+
+library(survival)
+library(survminer)
+
+# Prepare data for survival analysis
+km_data <- eff_data %>%
+  filter(!is.na(ttcc_time), !is.na(ttcc_event), !is.na(arm_label))
+
+if (nrow(km_data) > 0 && n_distinct(km_data$arm_label) > 0) {
+ 
+  # Fit KM model
+  km_fit <- survfit(Surv(ttcc_time, ttcc_event) ~ arm_label, data = km_data)
+ 
+  # Create KM plot
+  km_plot <- ggsurvplot(
+    km_fit,
+    data = km_data,
+    risk.table = TRUE,
+    censor = TRUE,
+    break.time.by = KM_BREAK_TIME,
+    xlim = KM_XLIM,
+    xlab = "Days from Randomization",
+    ylab = "Cumulative proportion without culture conversion\nin MGIT liquid media",
+    legend.title = "Treatment Arm",
+    legend.labs = levels(factor(km_data$arm_label)),
+    palette = unname(arm_colors[levels(factor(km_data$arm_label))]),
+    ggtheme = theme_bw(),
+    risk.table.height = 0.25,
+    surv.median.line = "hv"
+  )
+ 
+  print(km_plot)
+ 
+} else {
+  cat("Insufficient data for Kaplan-Meier analysis\n")
+}
+```
+
+## Survival Estimates {#sec-surv-estimates}
+
+```{r survival-estimates}
+#| label: survival-estimates
+
+if (exists("km_fit")) {
+  # Summary at specific time points
+  time_points <- c(14, 28, 56, 84, 112)
+  time_points <- time_points[time_points <= max(km_data$ttcc_time, na.rm = TRUE)]
+ 
+  if (length(time_points) > 0) {
+    surv_summary <- summary(km_fit, times = time_points)
+   
+    surv_table <- data.frame(
+      arm = surv_summary$strata,
+      time = surv_summary$time,
+      n_risk = surv_summary$n.risk,
+      n_event = surv_summary$n.event,
+      survival = round(surv_summary$surv, 3),
+      cumulative_events = round(1 - surv_summary$surv, 3),
+      lower_ci = round(surv_summary$lower, 3),
+      upper_ci = round(surv_summary$upper, 3)
+    )
+   
+    surv_table %>%
+      kable(
+        col.names = c("Arm", "Day", "N at Risk", "Events", "Survival", "Cum. Conversion", "Lower CI", "Upper CI"),
+        caption = "Survival Estimates at Key Time Points"
+      ) %>%
+      kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+  }
+ 
+  # Median survival times
+  cat("\n\nMedian Time to Culture Conversion:\n\n")
+  median_table <- surv_median(km_fit)
+  median_table %>%
+    kable(caption = "Median TTCC by Treatment Arm") %>%
+    kable_styling(bootstrap_options = c("striped"), full_width = FALSE)
+}
+```
+
+## Log-Rank Test {#sec-logrank}
+
+```{r logrank-test}
+#| label: logrank-test
+#| results: asis
+
+if (exists("km_fit") && n_distinct(km_data$arm_label) > 1) {
+  # Log-rank test
+  logrank <- survdiff(Surv(ttcc_time, ttcc_event) ~ arm_label, data = km_data)
+ 
+  cat("**Log-Rank Test for Difference Between Arms:**\n\n")
+  cat("- Chi-squared:", round(logrank$chisq, 2), "\n")
+  cat("- Degrees of freedom:", length(logrank$n) - 1, "\n")
+  cat("- P-value:", format.pval(pchisq(logrank$chisq, df = length(logrank$n) - 1, lower.tail = FALSE), digits = 3), "\n")
+}
+```
+
+
+# Additional QC Checks {#sec-qc}
+
+## Adherence Summary {#sec-adherence}
+
+```{r adherence-summary}
+#| label: adherence-summary
+
+adherence_cols <- c("mean_compl_pct", "min_compl_pct", "n_compl_visits", "pp_adherent")
+available_adh <- intersect(adherence_cols, names(eff_data))
+
+if (length(available_adh) > 0) {
+  cat("Adherence metrics available:", paste(available_adh, collapse = ", "), "\n\n")
+ 
+  if ("mean_compl_pct" %in% names(eff_data)) {
+    adh_summary <- eff_data %>%
+      group_by(arm_label) %>%
+      summarise(
+        n = n(),
+        mean_compliance = round(mean(mean_compl_pct, na.rm = TRUE), 1),
+        min_compliance = round(min(min_compl_pct, na.rm = TRUE), 1),
+        n_pp = sum(pp_flag, na.rm = TRUE),
+        .groups = "drop"
+      )
+   
+    adh_summary %>%
+      kable(
+        col.names = c("Arm", "N", "Mean Compliance %", "Min Compliance %", "N in PP"),
+        caption = "Adherence Summary by Arm"
+      ) %>%
+      kable_styling(bootstrap_options = c("striped"), full_width = FALSE)
+  }
+} else {
+  cat("No adherence metrics available in dataset\n")
+}
+```
+
+## Exposure Summary {#sec-exposure}
+
+```{r exposure-summary}
+#| label: exposure-summary
+
+exposure_cols <- c("first_exstdy", "last_exendy", "n_ex_records", "n_dispensing")
+available_exp <- intersect(exposure_cols, names(eff_data))
+
+if (length(available_exp) > 0) {
+  cat("Exposure metrics available:", paste(available_exp, collapse = ", "), "\n\n")
+ 
+  if ("first_exstdy" %in% names(eff_data) && "last_exendy" %in% names(eff_data)) {
+    exp_summary <- eff_data %>%
+      group_by(arm_label) %>%
+      summarise(
+        n = n(),
+        median_start = median(first_exstdy, na.rm = TRUE),
+        median_end = median(last_exendy, na.rm = TRUE),
+        median_duration = median(last_exendy - first_exstdy, na.rm = TRUE),
+        .groups = "drop"
+      )
+   
+    exp_summary %>%
+      kable(
+        col.names = c("Arm", "N", "Median Start Day", "Median End Day", "Median Duration"),
+        caption = "Exposure Summary by Arm"
+      ) %>%
+      kable_styling(bootstrap_options = c("striped"), full_width = FALSE)
+  }
+} else {
+  cat("No exposure metrics available in dataset\n")
+}
+```
+
+## Data Completeness {#sec-completeness}
+
+```{r data-completeness}
+#| label: data-completeness
+
+completeness <- data.frame(
+  column = names(eff_data),
+  n_total = nrow(eff_data),
+  n_missing = sapply(eff_data, function(x) sum(is.na(x)))
+) %>%
+  mutate(
+    pct_complete = round(100 * (n_total - n_missing) / n_total, 1)
+  ) %>%
+  arrange(pct_complete) %>%
+  filter(pct_complete < 100)
+
+if (nrow(completeness) > 0) {
+  completeness %>%
+    head(15) %>%
+    kable(
+      col.names = c("Column", "N Total", "N Missing", "% Complete"),
+      caption = "Columns with Missing Data"
+    ) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+} else {
+  cat("All columns are 100% complete\n")
+}
+```
+
+
+# Session Info {#sec-session}
+
+```{r session-info}
+#| label: session-info
+sessionInfo()
+```
