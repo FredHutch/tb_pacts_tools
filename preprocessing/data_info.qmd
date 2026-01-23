@@ -1,0 +1,232 @@
+---
+title: "Data Profile Report"
+format:
+  html:
+    theme:
+      - default
+      - full-width-toc.scss
+    code-fold: true
+    echo: false
+    keep-ipynb: false
+    toc: true
+    toc-location: right
+    toc-depth: 4
+    self-contained: true
+    df-print: paged
+execute:
+  warning: false
+  message: false
+---
+
+```{python}
+#| label: setup
+#| echo: false
+
+import warnings
+warnings.filterwarnings('ignore')
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+from itables import init_notebook_mode, show
+from IPython.display import Markdown, display
+
+# Set plotting style
+sns.set_theme(style="whitegrid")
+plt.rcParams['figure.figsize'] = [10, 6]
+plt.rcParams['figure.dpi'] = 100
+
+init_notebook_mode(all_interactive=True)
+
+# Import profiler module
+import data_profiler as dp
+```
+
+```{python}
+#| label: parameters
+#| tags: [parameters]
+
+filepath = ""
+```
+
+```{python}
+#| label: load-data
+#| echo: false
+
+# Load the data
+df, detected_format = dp.load_data(filepath)
+```
+
+## Overview
+
+This report provides a comprehensive profile of the input data file.
+
+```{python}
+#| label: overview
+#| echo: false
+
+stats = dp.get_overview_stats(df, filepath, detected_format)
+
+overview_text = f"""
+**File:** `{stats['filename']}`
+
+**Detected Format:** {stats['detected_format']}
+
+| Metric | Value |
+|:-------|------:|
+| Number of Observations (Rows) | {stats['n_observations']:,} |
+| Number of Variables (Columns) | {stats['n_variables']:,} |
+| Total Missing Cells | {stats['n_missing_cells']:,} ({stats['missing_pct']:.2f}%) |
+| Duplicate Rows | {stats['n_duplicate_rows']:,} |
+| Memory Usage | {stats['memory_str']} |
+"""
+
+display(Markdown(overview_text))
+```
+
+## Variable Information
+
+This table provides metadata about each variable in the dataset.
+
+```{python}
+#| label: variable-info
+#| echo: false
+
+var_info_df = dp.get_variable_info(df)
+show(var_info_df, paging=True, pageLength=15, searching=True, ordering=True)
+var_info_df.to_csv(filepath + '.info.csv')
+```
+
+## Numeric Variable Statistics
+
+Summary statistics for numeric variables.
+
+```{python}
+#| label: numeric-summary
+#| echo: false
+
+numeric_summary = dp.get_numeric_summary(df)
+
+if numeric_summary is not None:
+    show(numeric_summary, paging=True, pageLength=15, searching=True, ordering=True)
+else:
+    display(Markdown("*No numeric variables found in the dataset.*"))
+```
+
+## Categorical Variable Statistics
+
+Summary statistics for categorical variables.
+
+```{python}
+#| label: categorical-summary
+#| echo: false
+
+cat_summary = dp.get_categorical_summary(df)
+
+if cat_summary is not None:
+    show(cat_summary, paging=True, pageLength=15, searching=True, ordering=True)
+else:
+    display(Markdown("*No categorical variables found in the dataset.*"))
+```
+
+## Variable Correlations
+```{python}
+#| label: correlations
+#| echo: false
+
+# Compute correlations
+numeric_corr = dp.get_numeric_correlations(df)
+categorical_corr = dp.get_categorical_correlations(df)
+missing_matrix = dp.get_missing_matrix(df)
+
+# Display numeric correlations
+if numeric_corr is not None and len(numeric_corr) > 1:
+    print("### Numeric Variable Correlations (Spearman)")
+    fig_num_corr = dp.plot_correlation_heatmap(numeric_corr, "Numeric Correlations (Spearman)")
+    plt.show()
+    plt.close()
+else:
+    print("*Insufficient numeric variables for correlation analysis.*")
+```
+
+```{python}
+#| label: categorical-correlations
+#| echo: false
+
+# Display categorical correlations (Cramér's V)
+if categorical_corr is not None and len(categorical_corr) > 1:
+    print("### Categorical Variable Associations (Cramér's V)")
+    fig_cat_corr = dp.plot_correlation_heatmap(categorical_corr, "Categorical Associations (Cramér's V)", cmap="YlOrRd")
+    plt.show()
+    plt.close()
+else:
+    print("*Insufficient categorical variables for association analysis.*")
+```
+
+## Missingness Patterns
+
+```{python}
+#| label: missing-heatmap
+#| echo: false
+
+# Display missing value patterns
+cols_with_missing = df.columns[df.isnull().any()].tolist()
+
+if len(cols_with_missing) > 0:
+    print(f"### Missing Value Patterns ({len(cols_with_missing)} variables with missing data)")
+    fig_missing = dp.plot_missing_heatmap(df, max_cols=50)
+    if fig_missing is not None:
+        plt.show()
+        plt.close()
+    
+    # Show missing correlation if multiple columns have missing values
+    if len(cols_with_missing) > 1:
+        missing_corr = dp.get_missing_correlations(df)
+        if missing_corr is not None:
+            print("\n### Missing Value Correlations")
+            print("*Shows which variables tend to be missing together.*")
+            fig_miss_corr = dp.plot_correlation_heatmap(
+                missing_corr, 
+                "Missing Value Correlations", 
+                cmap="PuOr",
+                center=0
+            )
+            plt.show()
+            plt.close()
+else:
+    print("*No missing values in dataset.*")
+```
+
+## Variable Distributions
+
+Visual distributions for each variable based on its inferred type.
+
+```{python}
+#| label: distributions
+#| echo: false
+#| fig-width: 10
+#| fig-height: 5
+
+for col in df.columns:
+    series = df[col]
+    var_type = dp.infer_variable_type(series)
+    
+    # Skip empty columns
+    if series.dropna().empty:
+        display(Markdown(f"### {col}\n*Variable is empty (all missing values)*"))
+        continue
+    
+    display(Markdown(f"### {col}"))
+    display(Markdown(f"*Inferred type: {var_type}*"))
+    
+    fig = dp.plot_variable(series, var_type)
+    
+    if fig is not None:
+        plt.show()
+        plt.close()
+    else:
+        display(Markdown(f"*Variable has {series.nunique()} unique values - distribution plot not applicable*"))
+```
+
+---
+
+*Report generated with Python and Quarto*

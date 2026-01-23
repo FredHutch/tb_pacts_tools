@@ -1,0 +1,156 @@
+/*-- scss:defaults --*/
+
+// These variables set the grid at compile time
+$grid-body-width: 2000px !default;
+$grid-sidebar-width: 0px !default;
+$grid-margin-width: 280px !default;
+$grid-column-gutter-width: 1.5rem !default;
+
+/*-- scss:rules --*/
+
+// ==========================================================================
+// AGGRESSIVE FULL-WIDTH OVERRIDE FOR QUARTO
+// Targets the exact structure: .page-columns.page-layout-article
+// ==========================================================================
+
+// Root layout container - this is the main grid
+#quarto-content.page-columns.page-layout-article {
+  display: grid !important;
+  gap: 1.5rem !important;
+  // Two columns: flexible content + fixed TOC
+  grid-template-columns: minmax(0, 1fr) 280px !important;
+  max-width: none !important;
+  width: calc(100vw - 3rem) !important;
+  margin: 0 auto !important;
+  padding: 0 1.5rem !important;
+}
+
+// The main content area
+#quarto-content.page-layout-article > main.content,
+main.content#quarto-document-content {
+  max-width: none !important;
+  width: 100% !important;
+  grid-column: 1 !important;
+}
+
+// The margin sidebar (TOC)
+#quarto-margin-sidebar.sidebar.margin-sidebar {
+  width: 280px !important;
+  min-width: 250px !important;
+  max-width: 300px !important;
+  grid-column: 2 !important;
+  position: sticky !important;
+  top: 20px !important;
+  height: fit-content !important;
+  max-height: calc(100vh - 40px) !important;
+  overflow-y: auto !important;
+}
+
+// Remove any left sidebar area (not used when toc-location: right)
+.sidebar:not(.margin-sidebar) {
+  display: none !important;
+}
+
+// Title block
+.quarto-title-block {
+  max-width: none !important;
+}
+
+// Cell outputs (code chunks, figures, tables)
+.cell {
+  max-width: none !important;
+  width: 100% !important;
+}
+
+.cell-output-display {
+  max-width: none !important;
+  width: 100% !important;
+  overflow-x: auto !important;
+}
+
+// DataTables and itables specifically
+.dataTable,
+.dataTables_wrapper,
+table.display {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+// Matplotlib/seaborn figures
+.cell-output-display img,
+.cell-output-display figure {
+  max-width: 100% !important;
+  height: auto !important;
+}
+
+// Override Bootstrap container constraints
+.container,
+.container-fluid {
+  max-width: none !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+// Article body constraints - remove them
+article,
+article > * {
+  max-width: none !important;
+}
+
+// Section elements
+section {
+  max-width: none !important;
+}
+
+// Headings should span full width
+h1, h2, h3, h4, h5, h6,
+.title {
+  max-width: none !important;
+}
+
+// ==========================================================================
+// RESPONSIVE BREAKPOINTS
+// ==========================================================================
+
+// Medium screens - slightly smaller but still wide
+@media (max-width: 1199.98px) {
+  #quarto-content.page-columns.page-layout-article {
+    width: calc(100vw - 2rem) !important;
+    padding: 0 1rem !important;
+    grid-template-columns: minmax(0, 1fr) 250px !important;
+  }
+  
+  #quarto-margin-sidebar.sidebar.margin-sidebar {
+    width: 250px !important;
+  }
+}
+
+// Small screens - collapse to single column
+@media (max-width: 991.98px) {
+  #quarto-content.page-columns.page-layout-article {
+    grid-template-columns: 1fr !important;
+    width: calc(100vw - 2rem) !important;
+  }
+  
+  #quarto-margin-sidebar.sidebar.margin-sidebar {
+    position: relative !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    grid-column: 1 !important;
+    order: -1 !important; // TOC appears above content on mobile
+  }
+  
+  main.content#quarto-document-content {
+    grid-column: 1 !important;
+  }
+}
+
+// Very small screens
+@media (max-width: 575.98px) {
+  #quarto-content.page-columns.page-layout-article {
+    width: 100% !important;
+    padding: 0 0.5rem !important;
+  }
+}
+
