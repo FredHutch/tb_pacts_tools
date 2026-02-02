@@ -31,14 +31,19 @@
 # STUDY ID:     
 # =============================================================================
 
-
 # =============================================================================
-# LOAD HELPERS AND CONFIGURATION
+# LOAD REQUIRED PACKAGES
 # =============================================================================
 
-setwd("/fh/fast/gilbert_p/agartlan/gitrepo/tb_pacts_tools")
+setwd("~/tb_pacts_tools")
 devtools::load_all()
 
+# Core data manipulation packages
+library(dplyr)      # Data manipulation
+library(tidyr)      # Data tidying
+library(magrittr)   # Pipe operators
+library(lubridate)  # Date handling
+library(stringr)    # String manipulation
 
 # =============================================================================
 # STUDY CONFIGURATION - MODIFY THIS SECTION FOR EACH STUDY

@@ -29,8 +29,19 @@ knitr:
 #| label: setup
 #| include: false
 
-setwd("/fh/fast/gilbert_p/agartlan/gitrepo/tb_pacts_tools")
+setwd("~/tb_pacts_tools")
 devtools::load_all()
+
+# Core packages
+library(dplyr)        # Data manipulation
+library(tidyr)        # Data tidying
+library(ggplot2)      # Visualization
+library(knitr)        # Table formatting
+library(kableExtra)   # Enhanced tables
+
+# Survival analysis packages
+library(survival)     # Survival models and KM curves
+library(survminer)    # Enhanced survival plots
 
 # Set kable options
 options(knitr.kable.NA = "—")

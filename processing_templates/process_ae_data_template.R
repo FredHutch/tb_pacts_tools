@@ -26,7 +26,7 @@
 # LOAD HELPERS AND CONFIGURATION
 # =============================================================================
 
-setwd("/fh/fast/gilbert_p/agartlan/gitrepo/tb_pacts_tools")
+setwd("~/tb_pacts_tools")
 devtools::load_all()
 
 # =============================================================================
@@ -63,14 +63,16 @@ TREATMENT_ARMS <- NULL
 # SETUP - DO NOT MODIFY
 # =============================================================================
 
-# Load required packages
-suppressPackageStartupMessages({
-  library(dplyr)
-  library(tidyr)
-  library(magrittr)
-  library(lubridate)
-  library(stringr)
-})
+# =============================================================================
+# LOAD REQUIRED PACKAGES
+# =============================================================================
+
+# Core data manipulation packages
+library(dplyr)      # Data manipulation
+library(tidyr)      # Data tidying
+library(magrittr)   # Pipe operators
+library(lubridate)  # Date handling
+library(stringr)    # String manipulation
 
 
 # Generate output filename

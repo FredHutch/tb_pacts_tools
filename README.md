@@ -1,50 +1,43 @@
 # TB-PACTS Tools (tb_pacts_tools)
 
-## Instructions
+This repo is an R package with tools for creating and validating analysis datasets from the raw TB-PACTs datasets.
 
-### DEPENDENCIES
+## Contents
 
-```{r}
-magrittr
-dplyr
-summarytools
-tidyr
-ggplot2
-knitr
-kableExtra
-lubridate
-stringr
-forcats
-ggradar
-ggpubr
-purrr
-ragg
+### `R` folder
+
+Since this repository is an actual R package, there are several helper functions in the `R` folder that can be imported by loading or reloading the package by installing the package and running `load(tb_pacts_tools)` or by changing to the repo folder and running:
+
 ```
-
-### RECONFIGURE THE FOLLOWING:
-
-Define `tbacts_datapath` in `R/helpers.R`. It should end with "TB-PACTS" and contain a folder "csv" containing all the CDISC datasets.
-
-### LOAD HELPER FUNCTIONS WITH `devtools::load_all()`
-
-```{r}
-setwd("/Volumes/fh/fast/gilbert_p/fg_data/TB-PACTS/gitrepos/tb_pacts_tools")
+setwd("~/tb_pacts_tools")
 devtools::load_all()
 ```
 
+You can modify the paths in `R/helpers.R` to change where code and data is located on your computer. Check these paths to make sure you have access to the data.
+
+
+### `processing_templates` folder
+
+The R scripts in this repo process and combine the raw CSV datasets from TB-PACTs and produce analysis datasets that are ready for downstream analysis. You should be able to run these scripts to create analysis datasets for adverse events (AE) and TB treatment efficacy:
+
 ```
-✓ Loaded Katrina Dobinda's custom functions: pre_processing_ae_data()
-✓ Loaded Katrina Dobinda's custom functions: ctgov_ae_tables_single_arm()
-✓ Loaded Katrina Dobinda's custom functions: ctgov_ae_tables_multi_arm()
-✓ Loaded Katrina Dobinda's custom functions: exporting_xlsx_template()
-✓ Loaded custom functions: rm_cols() from data_cleaning_functions.R
-✓ Loaded custom save_gg_pdf() from plot_helpers.R
-✓ Loaded custom get_cdisc_labels() from variable_namess.R
+process_ae_data_template.R
+process_eff_data_template.R
 ```
 
-# Demonstrations
+They are considered templates because they have been written and tested to process data from one trial in the TB-PACTS repository. The scripts could be copied and modified to work for additional studies, with each checked individually for quality.
 
-## 1. `/demonstration/ae_demo.r`  
+There are also two Quarto markdown files (QMDs) that load the analysis datasets and perform checks and make plots for verifying the quality of the processed data.
+```
+ae_analysis_report_template.qmd
+eff_analysis_report_template.qmd
+```
 
-This tutorial demonstrates how to analyze and visualize adverse events (AEs)
-from the TB-PACTS SimpliciTB clinical trial (Study TB-1037). It loads CDISC-formatted trial data, processes adverse events across three treatment regimens using Katrina Dobinda's CT.gov reporting functions, and creates comparative visualizations. The script generates two types of plots: `spider/radar` charts showing the top 10 most prevalent AE categories by organ system across treatment arms, and `love plots` displaying individual AE terms ranked by frequency. All visualizations are automatically saved as PDFs to a specified folder.
+Once the relevenat analysis dataset has been created for the specific study, the QMD can be rendered either interactively in R studio or on the command line terminal:
+```
+quarto render ae_analysis_report_template.qmd
+```
+
+## Next steps
+
+Make a copy of the template and name it for the study with which you want to be working. Try to run the processing script and the report QMD. Try to put all study-specific modifications into the pre-processing code when possible so that we get standardized analysis datasets for every study. Ideally, the same reporting QMD will work for the analysis dataset from all studies, enabling simplified meta-analysis.
