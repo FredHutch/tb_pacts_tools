@@ -26,8 +26,7 @@
 # LOAD HELPERS AND CONFIGURATION
 # =============================================================================
 
-setwd("~/tb_pacts_tools")
-devtools::load_all()
+devtools::load_all("./tb_pacts_tools")
 
 # =============================================================================
 # STUDY CONFIGURATION - MODIFY THIS SECTION FOR EACH STUDY

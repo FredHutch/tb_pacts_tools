@@ -35,8 +35,7 @@
 # LOAD REQUIRED PACKAGES
 # =============================================================================
 
-setwd("~/tb_pacts_tools")
-devtools::load_all()
+devtools::load_all("./tb_pacts_tools")
 
 # Core data manipulation packages
 library(dplyr)      # Data manipulation

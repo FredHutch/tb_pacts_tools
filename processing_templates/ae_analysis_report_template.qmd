@@ -29,12 +29,12 @@ knitr:
 #| label: setup
 #| include: false
 
-setwd("~/tb_pacts_tools")
-devtools::load_all()
+devtools::load_all("./tb_pacts_tools")
 
 # Core packages
 library(dplyr)        # Data manipulation
 library(tidyr)        # Data tidying
+require(purrr)
 library(ggplot2)      # Visualization
 library(knitr)        # Table formatting
 library(kableExtra)   # Enhanced tables
@@ -58,7 +58,6 @@ study_label <- paste(STUDY_IDS, collapse = "_")
 ADATA_PATH <- file.path(tbpacts_adata, paste(STUDY_IDS, collapse = "_"))
 
 fn <- paste0("ae_adata_", study_label, "_", format(Sys.Date(), "%Y%m%d"), ".csv")
-fn <- "ae_adata_TB-1037_20260121.csv"
 
 ADATA_FILENAME <- file.path(ADATA_PATH, fn)
 
